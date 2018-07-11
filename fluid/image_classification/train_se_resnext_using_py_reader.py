@@ -111,8 +111,8 @@ def feed_data(feed_queue, reader, sync_signal, epoch_num, image_shape):
             next_data = next(data_generator, None)
             if next_data is None:
                 sync_signal.acquire()
-                feed_queue.push_eof()
-                while feed_queue.is_eof():
+                feed_queue.close()
+                while feed_queue.is_closed():
                     sync_signal.wait()
                 sync_signal.release()
                 break
@@ -127,7 +127,7 @@ def feed_data(feed_queue, reader, sync_signal, epoch_num, image_shape):
             tensors.append(as_tensor(label.reshape([-1, 1])))
             feed_queue.push(tensors)
 
-    feed_queue.push_eof()
+    feed_queue.close()
 
 
 def train(args):
