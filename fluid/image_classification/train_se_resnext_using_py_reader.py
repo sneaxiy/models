@@ -203,7 +203,6 @@ def train(args):
                     sys.stdout.flush()
                 batch_id += 1
             except fluid.core.EOFException as ex:
-                print(ex)
                 train_sync_signal.acquire()
                 train_py_reader.reset()
                 train_sync_signal.notify()
