@@ -1,5 +1,6 @@
 import os
 import sys
+import multiprocessing
 import time
 import unittest
 import contextlib
@@ -7,6 +8,8 @@ import numpy as np
 
 import paddle
 import paddle.fluid as fluid
+import paddle.fluid.profiler as profiler
+import paddle.fluid.core as core
 
 import utils
 from nets import bow_net
@@ -54,10 +57,22 @@ def train(train_reader,
     train_py_reader.decorate_paddle_reader(train_reader)
 
     if parallel:
+        if use_cuda:
+            gpu_num = core.get_cuda_device_count()
+            total_batch_size_per_batch = batch_size * gpu_num
+        else:
+            cpu_num = cpu_num = int(
+                os.environ.get('CPU_NUM', multiprocessing.cpu_count()))
+            total_batch_size_per_batch = batch_size * cpu_num
+    else:
+        total_batch_size_per_batch = batch_size
+
+    if parallel:
         parallel_exe = fluid.ParallelExecutor(
             main_program=train_prog, use_cuda=use_cuda, loss_name=cost.name)
 
     train_fetch_list = [cost.name, acc.name]
+    times = []
 
     for pass_id in xrange(pass_num):
         train_py_reader.start()
@@ -65,26 +80,39 @@ def train(train_reader,
         batch_id = 0
         try:
             while True:
+                if pass_id == 1 and batch_id == 10:
+                    profiler.start_profiler("All")
+                elif pass_id == 1 and batch_id == 15:
+                    profiler.stop_profiler("total", "/tmp/profile")
+
                 if not parallel:
+                    start = time.time()
                     avg_cost_np, avg_acc_np = exe.run(
                         train_prog, fetch_list=train_fetch_list)
+                    end = time.time()
                 else:
+                    start = time.time()
                     avg_cost_np, avg_acc_np = parallel_exe.run(
                         fetch_list=train_fetch_list)
+                    end = time.time()
+
                 avg_cost_np = np.mean(np.array(avg_cost_np))
                 avg_acc_np = np.mean(np.array(avg_acc_np))
                 train_info[0].append(avg_cost_np)
                 train_info[1].append(avg_acc_np)
+                times.append(end - start)
                 batch_id += 1
+                print(
+                    'pass_id: {}, batch_id: {}, avg_acc: {}, avg_cost: {}, speed: {}ms/sample, total_batch_size: {}'
+                    .format(pass_id, batch_id, avg_acc_np, avg_cost_np, (
+                        end - start) * 1000 / total_batch_size_per_batch,
+                            total_batch_size_per_batch))
+                sys.stdout.flush()
         except fluid.core.EOFException:
             train_py_reader.reset()
 
         avg_cost = np.array(train_info[0]).mean()
         avg_acc = np.array(train_info[1]).mean()
-
-        print("pass_id: %d, avg_acc: %f, avg_cost: %f" %
-              (pass_id, avg_cost, avg_acc))
-        sys.stdout.flush()
 
         model_path = os.path.join(save_dirname + "/" + "epoch" + str(pass_id))
         if not os.path.isdir(model_path):
@@ -100,57 +128,72 @@ def train(train_reader,
         if "CE_MODE_X" in os.environ:
             print("kpis	train_acc	%f" % avg_acc)
             print("kpis	train_cost	%f" % avg_cost)
+
             print("kpis	train_duration	%f" % (pass_end - pass_start))
+
+    print("Total time: {}s,  speed: {}ms/sample".format(
+        np.sum(times), np.mean(times) * 1000 / total_batch_size_per_batch))
 
 
 def train_net():
+    batch_size = 128
+    pass_num = 10
+
+    start = time.time()
     word_dict, train_reader, test_reader = utils.prepare_data(
-        "imdb", self_dict=False, batch_size=128, buf_size=50000)
+        "imdb", self_dict=False, batch_size=batch_size, buf_size=50000)
+    print('Date preparation time: {}s'.format(time.time() - start))
+
+    data = next(train_reader())
+    print(len(data))
+    for d in data:
+        print(len(d[0]), d[1])
+    return
 
     if sys.argv[1] == "bow":
         train(
             train_reader,
             word_dict,
             bow_net,
-            use_cuda=False,
-            parallel=False,
+            use_cuda=True,
+            parallel=True,
             save_dirname="bow_model",
             lr=0.002,
-            pass_num=30,
-            batch_size=128)
+            pass_num=pass_num,
+            batch_size=batch_size)
     elif sys.argv[1] == "cnn":
         train(
             train_reader,
             word_dict,
             cnn_net,
             use_cuda=True,
-            parallel=False,
+            parallel=True,
             save_dirname="cnn_model",
             lr=0.01,
-            pass_num=30,
-            batch_size=4)
+            pass_num=pass_num,
+            batch_size=batch_size)
     elif sys.argv[1] == "lstm":
         train(
             train_reader,
             word_dict,
             lstm_net,
             use_cuda=True,
-            parallel=False,
+            parallel=True,
             save_dirname="lstm_model",
             lr=0.05,
-            pass_num=30,
-            batch_size=4)
+            pass_num=pass_num,
+            batch_size=batch_size)
     elif sys.argv[1] == "gru":
         train(
             train_reader,
             word_dict,
-            lstm_net,
+            gru_net,
             use_cuda=True,
-            parallel=False,
+            parallel=True,
             save_dirname="gru_model",
             lr=0.05,
-            pass_num=30,
-            batch_size=128)
+            pass_num=pass_num,
+            batch_size=batch_size)
     else:
         print("network name cannot be found!")
         sys.exit(1)

@@ -26,7 +26,7 @@ def bow_net(data,
     avg_cost = fluid.layers.mean(x=cost)
     acc = fluid.layers.accuracy(input=prediction, label=label)
 
-    return avg_cost, acc, prediction
+    #return avg_cost, acc, prediction
 
 
 def cnn_net(data,
@@ -41,21 +41,14 @@ def cnn_net(data,
     conv net
     """
     emb = fluid.layers.embedding(input=data, size=[dict_dim, emb_dim])
-
-    conv_3 = fluid.nets.sequence_conv_pool(
-        input=emb,
-        num_filters=hid_dim,
-        filter_size=win_size,
-        act="tanh",
-        pool_type="max")
-
+    tmp = fluid.layers.sequence_conv(
+        input=emb, num_filters=hid_dim, filter_size=win_size, act="tanh")
+    conv_3 = fluid.layers.sequence_pool(input=tmp, pool_type="max")
     fc_1 = fluid.layers.fc(input=[conv_3], size=hid_dim2)
-
     prediction = fluid.layers.fc(input=[fc_1], size=class_dim, act="softmax")
-    #cost = fluid.layers.cross_entropy(input=prediction, label=label)
-    #avg_cost = fluid.layers.mean(x=cost)
-    #acc = fluid.layers.accuracy(input=prediction, label=label)
-
+    cost = fluid.layers.cross_entropy(input=prediction, label=label)
+    avg_cost = fluid.layers.mean(x=cost)
+    acc = fluid.layers.accuracy(input=prediction, label=label)
     #return avg_cost, acc, prediction
 
 
@@ -91,7 +84,7 @@ def lstm_net(data,
     avg_cost = fluid.layers.mean(x=cost)
     acc = fluid.layers.accuracy(input=prediction, label=label)
 
-    return avg_cost, acc, prediction
+    #return avg_cost, acc, prediction
 
 
 def gru_net(data,
@@ -121,4 +114,18 @@ def gru_net(data,
     avg_cost = fluid.layers.mean(x=cost)
     acc = fluid.layers.accuracy(input=prediction, label=label)
 
-    return avg_cost, acc, prediction
+    #return avg_cost, acc, prediction
+
+
+network = cnn_net
+data = fluid.layers.data(name="input", shape=[1], dtype="int64", lod_level=1)
+label = fluid.layers.data(name="label", shape=[1], dtype="int64")
+
+network(data, label, 5147)
+print(fluid.default_main_program())
+
+with open('text_classification_startup.protobin', 'wb') as f:
+    f.write(fluid.default_startup_program().desc.serialize_to_string())
+
+with open('text_classification_main.protobin', 'wb') as f:
+    f.write(fluid.default_main_program().desc.serialize_to_string())
